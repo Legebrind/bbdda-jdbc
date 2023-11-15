@@ -5,13 +5,11 @@ import com.opencsv.CSVReader;
 import com.opencsv.CSVReaderBuilder;
 import com.opencsv.exceptions.CsvValidationException;
 import com.unir.config.MySqlConnector;
-import com.unir.model.MySqlEmployee;
+import com.unir.model.*;
 import lombok.extern.slf4j.Slf4j;
 import java.io.FileReader;
 import java.io.IOException;
 import java.sql.*;
-import java.text.ParseException;
-import java.text.SimpleDateFormat;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -20,9 +18,9 @@ import java.util.List;
  * La tabla de Oracle contiene muchas restricciones y triggers. Por simplicidad, usamos MySQL en este caso.
  */
 @Slf4j
-public class MySqlApplicationIntake {
+public class LocalidadesIntake {
 
-    private static final String DATABASE = "employees";
+    private static final String DATABASE = "precioCarburantes";
 
     public static void main(String[] args) {
 
@@ -33,10 +31,10 @@ public class MySqlApplicationIntake {
             log.info("Conexión establecida con la base de datos MySQL");
 
             // Leemos los datos del fichero CSV
-            List<MySqlEmployee> employees = readData();
+            List<Localidad> localidades = readLocalidad(connection);
 
             // Introducimos los datos en la base de datos
-            intake(connection, employees);
+            intakeLocalidad(connection, localidades);
 
         } catch (Exception e) {
             log.error("Error al tratar con la base de datos", e);
@@ -44,67 +42,67 @@ public class MySqlApplicationIntake {
     }
 
     /**
-     * Lee los datos del fichero CSV y los devuelve en una lista de empleados.
+     * Lee los datos del fichero CSV y los devuelve en una lista de localidades.
      * El fichero CSV debe estar en la raíz del proyecto.
      *
-     * @return - Lista de empleados
+     * @return - Lista de localidades
      */
-    private static List<MySqlEmployee> readData() {
+    private static List<Localidad> readLocalidad(Connection connection) {
+        
 
         // Try-with-resources. Se cierra el reader automáticamente al salir del bloque try
         // CSVReader nos permite leer el fichero CSV linea a linea
         try (CSVReader reader = new CSVReaderBuilder(
-                new FileReader("unirEmployees.csv"))
+                new FileReader("Localidades.csv"))
                 .withCSVParser(new CSVParserBuilder()
-                .withSeparator(',').build()).build()) {
+                .withSeparator(';').build()).build()) {
 
-            // Creamos la lista de empleados y el formato de fecha
-            List<MySqlEmployee> employees = new LinkedList<>();
-            SimpleDateFormat format = new SimpleDateFormat("yyy-MM-dd");
+            // Creamos la lista de localidades y el formato de fecha
+            List<Localidad> localidades = new LinkedList<>();
+            // SimpleDateFormat format = new SimpleDateFormat("yyy-MM-dd");
 
             // Saltamos la primera linea, que contiene los nombres de las columnas del CSV
             reader.skip(1);
             String[] nextLine;
+            int contador = lastId(connection);
 
             // Leemos el fichero linea a linea
             while((nextLine = reader.readNext()) != null) {
-
-                // Creamos el empleado y lo añadimos a la lista
-                MySqlEmployee employee = new MySqlEmployee(
-                        Integer.parseInt(nextLine[0]),
+                contador++;
+                // Creamos la localidad y la añadimos a la lista
+                Localidad localidad = new Localidad(
+                        contador,
+                        nextLine[0],
                         nextLine[1],
-                        nextLine[2],
-                        nextLine[3],
-                        new Date(format.parse(nextLine[4]).getTime()),
-                        new Date(format.parse(nextLine[5]).getTime())
+                        nextLine[2]
                 );
-                employees.add(employee);
+                localidades.add(localidad);
             }
-            return employees;
+            return localidades;
         } catch (IOException e) {
             log.error("Error al leer el fichero CSV", e);
             throw new RuntimeException(e);
-        } catch (CsvValidationException | ParseException e) {
+        } catch (CsvValidationException | SQLException e) {
             throw new RuntimeException(e);
         }
     }
 
     /**
      * Introduce los datos en la base de datos.
-     * Si el empleado ya existe, se actualiza.
+     * Si la localidad ya existe, se actualiza.
      * Si no existe, se inserta.
      *
-     * Toma como referencia el campo emp_no para determinar si el empleado existe o no.
+     * Toma como referencia el campo emp_no para determinar si la localidad existe o no.
      * @param connection - Conexión a la base de datos
-     * @param employees - Lista de empleados
+     * @param localidades - Lista de localidades
      * @throws SQLException - Error al ejecutar la consulta
      */
-    private static void intake(Connection connection, List<MySqlEmployee> employees) throws SQLException {
+    private static void intakeLocalidad(Connection connection, List<Localidad> localidades) throws SQLException {
 
-        String selectSql = "SELECT COUNT(*) FROM employees WHERE emp_no = ?";
-        String insertSql = "INSERT INTO employees (emp_no, first_name, last_name, gender, hire_date, birth_date) "
-                + "VALUES (?, ?, ?, ?, ?, ?)";
-        String updateSql = "UPDATE employees SET first_name = ?, last_name = ?, gender = ?, hire_date = ?, birth_date = ? WHERE emp_no = ?";
+        String selectSql = "SELECT COUNT(*) FROM localidad WHERE nombre = ?";
+        String insertSql = "INSERT INTO localidad (id, provincia, municipio, nombre) "
+                + "VALUES (?, ?, ?, ?)";
+        String updateSql = "UPDATE localidad SET provincia = ?, municipio = ?, nombre = ?";
         int lote = 5;
         int contador = 0;
 
@@ -115,21 +113,21 @@ public class MySqlApplicationIntake {
         // Desactivamos el autocommit para poder ejecutar el batch y hacer commit al final
         connection.setAutoCommit(false);
 
-        for (MySqlEmployee employee : employees) {
+        for (Localidad localidad : localidades) {
 
-            // Comprobamos si el empleado existe
+            // Comprobamos si la localidad existe
             PreparedStatement selectStatement = connection.prepareStatement(selectSql);
-            selectStatement.setInt(1, employee.getEmployeeId()); // Código del empleado
+            selectStatement.setString(1, localidad.getNombre()); // Nombre de la localidad
             ResultSet resultSet = selectStatement.executeQuery();
             resultSet.next(); // Nos movemos a la primera fila
             int rowCount = resultSet.getInt(1);
 
             // Si existe, actualizamos. Si no, insertamos
             if(rowCount > 0) {
-                fillUpdateStatement(updateStatement, employee);
+                fillUpdateStatementLocalidad(updateStatement, localidad);
                 updateStatement.addBatch();
             } else {
-                fillInsertStatement(insertStatement, employee);
+                fillInsertStatementLocalidad(insertStatement, localidad);
                 insertStatement.addBatch();
             }
 
@@ -153,33 +151,27 @@ public class MySqlApplicationIntake {
      * Rellena los parámetros de un PreparedStatement para una consulta INSERT.
      *
      * @param statement - PreparedStatement
-     * @param employee - Empleado
+     * @param localidad - Localidad
      * @throws SQLException - Error al rellenar los parámetros
      */
-    private static void fillInsertStatement(PreparedStatement statement, MySqlEmployee employee) throws SQLException {
-        statement.setInt(1, employee.getEmployeeId());
-        statement.setString(2, employee.getFirstName());
-        statement.setString(3, employee.getLastName());
-        statement.setString(4, employee.getGender());
-        statement.setDate(5, employee.getHireDate());
-        statement.setDate(6, employee.getBirthDate());
-
+    private static void fillInsertStatementLocalidad(PreparedStatement statement, Localidad localidad) throws SQLException {
+        statement.setInt(1, localidad.getId());
+        statement.setString(2, localidad.getProvincia());
+        statement.setString(3, localidad.getMunicipio());
+        statement.setString(4, localidad.getNombre());
     }
 
     /**
      * Rellena los parámetros de un PreparedStatement para una consulta UPDATE.
      *
      * @param statement - PreparedStatement
-     * @param employee - Empleado
+     * @param localidad - Localidad
      * @throws SQLException - Error al rellenar los parámetros
      */
-    private static void fillUpdateStatement(PreparedStatement statement, MySqlEmployee employee) throws SQLException {
-        statement.setString(1, employee.getFirstName());
-        statement.setString(2, employee.getLastName());
-        statement.setString(3, employee.getGender());
-        statement.setDate(4, employee.getHireDate());
-        statement.setDate(5, employee.getBirthDate());
-        statement.setInt(6, employee.getEmployeeId());
+    private static void fillUpdateStatementLocalidad(PreparedStatement statement, Localidad localidad) throws SQLException {
+        statement.setString(1, localidad.getProvincia());
+        statement.setString(2, localidad.getMunicipio());
+        statement.setString(3, localidad.getNombre());
     }
 
     /**
@@ -192,11 +184,9 @@ public class MySqlApplicationIntake {
      * @return - Último id de la columna
      * @throws SQLException - Error al ejecutar la consulta
      */
-    private static int lastId(Connection connection, String table, String fieldName) throws SQLException {
-        String selectSql = "SELECT MAX(?) FROM ?";
+    private static int lastId(Connection connection) throws SQLException {
+        String selectSql = "SELECT MAX(id) FROM localidad";
         PreparedStatement selectStatement = connection.prepareStatement(selectSql);
-        selectStatement.setString(1, fieldName);
-        selectStatement.setString(2, table);
         ResultSet resultSet = selectStatement.executeQuery();
         resultSet.next(); // Nos movemos a la primera fila
         return resultSet.getInt(1);

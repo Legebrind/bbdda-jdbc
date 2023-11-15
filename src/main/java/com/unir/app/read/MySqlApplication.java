@@ -8,7 +8,7 @@ import java.sql.*;
 @Slf4j
 public class MySqlApplication {
 
-    private static final String DATABASE = "employees";
+    private static final String DATABASE = "precioCarburantes";
 
     public static void main(String[] args) {
 
@@ -16,56 +16,123 @@ public class MySqlApplication {
         //Try-with-resources. Se cierra la conexión automáticamente al salir del bloque try
         try(Connection connection = new MySqlConnector("localhost", DATABASE).getConnection()) {
 
-            log.info("Conexión establecida con la base de datos Oracle");
+            log.info("Conexión establecida con la base de datos");
 
-            selectAllEmployeesOfDepartment(connection, "d001");
-            selectAllEmployeesOfDepartment(connection, "d002");
+            selectEmpresaMasTerrestres(connection);
+            selectEmpresaMasMaritimas(connection);
+            selectEmpresaTerrestreMasBarata95E5Provincia(connection, "Madrid");
+            selectEmpresaTerrestreMasBarataGASADistancia(connection, "Albacete", -1.855783, 38.9958, 10000);
+            selectProvinciaEmpresaMaritimaMasCara95E5(connection);
+        
 
         } catch (Exception e) {
             log.error("Error al tratar con la base de datos", e);
         }
-    }
+    }    
 
-    /**
-     * Ejemplo de consulta a la base de datos usando Statement.
-     * Statement es la forma más básica de ejecutar consultas a la base de datos.
-     * Es la más insegura, ya que no se protege de ataques de inyección SQL.
-     * No obstante es útil para sentencias DDL.
-     * @param connection
-     * @throws SQLException
-     */
-    private static void selectAllEmployees(Connection connection) throws SQLException {
-        Statement selectEmployees = connection.createStatement();
-        ResultSet employees = selectEmployees.executeQuery("select * from employees");
+    private static void selectEmpresaMasTerrestres(Connection connection) throws SQLException {
+        PreparedStatement selectEmpresa = connection.prepareStatement("select gasolinera.empresaId, empresa.nombre, COUNT(gasolinera.empresaId) cuenta \n" +
+                "FROM gasolinera inner join\n" +
+                "empresa on gasolinera.empresaId = empresa.id\n" +
+                "GROUP BY empresaId\n" +
+                "ORDER BY cuenta DESC LIMIT 1;\n");
+        ResultSet empresa = selectEmpresa.executeQuery();
 
-        while (employees.next()) {
-            log.debug("Employee: {} {}",
-                    employees.getString("first_name"),
-                    employees.getString("last_name"));
+        if (empresa.next()) {
+            log.debug("La empresa con mas estaciones de servicio terrestres es {} con {}",
+                    empresa.getString("nombre"),
+                    empresa.getString("cuenta"));
         }
     }
 
-    /**
-     * Ejemplo de consulta a la base de datos usando PreparedStatement.
-     * PreparedStatement es la forma más segura de ejecutar consultas a la base de datos.
-     * Se protege de ataques de inyección SQL.
-     * Es útil para sentencias DML.
-     * @param connection
-     * @throws SQLException
-     */
-    private static void selectAllEmployeesOfDepartment(Connection connection, String department) throws SQLException {
-        PreparedStatement selectEmployees = connection.prepareStatement("select count(*) as 'Total'\n" +
-                "from employees emp\n" +
-                "inner join dept_emp dep_rel on emp.emp_no = dep_rel.emp_no\n" +
-                "inner join departments dep on dep_rel.dept_no = dep.dept_no\n" +
-                "where dep_rel.dept_no = ?;\n");
-        selectEmployees.setString(1, department);
-        ResultSet employees = selectEmployees.executeQuery();
+    private static void selectEmpresaMasMaritimas(Connection connection) throws SQLException {
+        PreparedStatement selectEmpresa = connection.prepareStatement("select embarcadero.empresaId, empresa.nombre, COUNT(embarcadero.empresaId) cuenta \n" +
+                "FROM embarcadero inner join\n" +
+                "empresa on embarcadero.empresaId = empresa.id\n" +
+                "GROUP BY empresaId\n" +
+                "ORDER BY cuenta DESC LIMIT 1;\n");
+        ResultSet empresa = selectEmpresa.executeQuery();
 
-        while (employees.next()) {
-            log.debug("Empleados del departamento {}: {}",
-                    department,
-                    employees.getString("Total"));
+        if (empresa.next()) {
+            log.debug("La empresa con mas estaciones de servicio maritimas es {} con {}",
+                    empresa.getString("nombre"),
+                    empresa.getString("cuenta"));
+        }
+    }
+
+    private static void selectEmpresaTerrestreMasBarata95E5Provincia(Connection connection, String provincia) throws SQLException {
+        PreparedStatement selectEmpresa = connection.prepareStatement(
+            "SELECT empresa.nombre nombreEmpresa, gasolinera.direccion, gasolinera.margen, localidad.provincia, localidad.municipio, localidad.nombre nombreLocalidad, precios.gasolina95E5 \n" +
+            "FROM empresa \n" +
+            "INNER JOIN \n" +
+                "gasolinera on  empresa.id = gasolinera.empresaId \n" +
+            "INNER JOIN \n" +
+                "precios on gasolinera.preciosId = precios.id \n" +
+            "INNER JOIN \n" +
+                "localidad on gasolinera.localidadId = localidad.id \n" +
+            "where localidad.provincia = ? and gasolina95E5 > 0 \n" +
+            "ORDER BY gasolina95E5 LIMIT 1");
+        selectEmpresa.setString(1, provincia);
+
+        ResultSet empresa = selectEmpresa.executeQuery();
+
+        if (empresa.next()) {
+            log.debug("La gasolinera con 95E5 mas barata en la provincia de {} está en {}, {}, {} margen {} y propiedad de {}",
+                empresa.getString("provincia"),
+                empresa.getString("direccion"),
+                empresa.getString("nombreLocalidad"),
+                empresa.getString("municipio"),
+                empresa.getString("margen"),                
+                empresa.getString("nombreEmpresa"));
+        }
+    }
+
+    private static void selectEmpresaTerrestreMasBarataGASADistancia(Connection connection,String localidad, Double longitud, Double latitud, Integer distancia) throws SQLException {
+        PreparedStatement selectEmpresa = connection.prepareStatement(
+            "SELECT ST_Distance_Sphere(POINT(latitud, longitud), POINT(?, ?)) distancia, direccion, gasoleoA \n" +
+            "FROM gasolinera \n" +
+            "INNER JOIN \n" +
+                "precios on gasolinera.preciosId = precios.id \n" +
+            "HAVING distancia <= ? \n" +
+            "ORDER BY gasoleoA \n" +
+            "LIMIT 1");
+        selectEmpresa.setDouble(1, latitud);
+        selectEmpresa.setDouble(2, longitud);
+        selectEmpresa.setInt(3, distancia);
+
+        ResultSet empresa = selectEmpresa.executeQuery();
+
+        if (empresa.next()) {
+            log.debug("A un maximo de {} km del centro de {} la gasolinera con el gasoleo A mas barato está en {} (distancia {} m). ",
+                distancia/1000,
+                localidad,
+                empresa.getString("direccion"),
+                empresa.getInt("distancia"));
+        }
+    }
+
+    private static void selectProvinciaEmpresaMaritimaMasCara95E5(Connection connection) throws SQLException {
+        PreparedStatement selectEmpresa = connection.prepareStatement(
+            "SELECT empresa.nombre nombreEmpresa, embarcadero.direccion, localidad.provincia, localidad.municipio, localidad.nombre nombreLocalidad, precios.gasolina95E5 \n" +
+            "FROM empresa \n" +
+            "INNER JOIN \n" +
+                "embarcadero on  empresa.id = embarcadero.empresaId \n" +
+            "INNER JOIN \n" +
+                "precios on embarcadero.preciosId = precios.id \n" +
+            "INNER JOIN \n" +
+                "localidad on embarcadero.localidadId = localidad.id \n" +
+            "where gasolina95E5 > 0 \n" +
+            "ORDER BY gasolina95E5 DESC LIMIT 1");
+
+        ResultSet empresa = selectEmpresa.executeQuery();
+
+        if (empresa.next()) {
+            log.debug("El embarcadero con 95E5 mas cara se encuentra en la provincia de {}, direccion {}, {}, {} y es propiedad de {}",
+                empresa.getString("provincia"),
+                empresa.getString("direccion"),
+                empresa.getString("nombreLocalidad"),
+                empresa.getString("municipio"),
+                empresa.getString("nombreEmpresa"));
         }
     }
 }

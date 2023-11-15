@@ -1,6 +1,7 @@
 # General
 logs
 *.NavData
+*.env
 
 # Java class files.
 *.class

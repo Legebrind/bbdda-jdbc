@@ -21,6 +21,7 @@ public class MySqlConnector {
     public MySqlConnector(String host, String database) {
 
         try {
+
             //Creamos la conexión a la base de datos
             this.connection = DriverManager.getConnection(
                     "jdbc:mysql://" + host + "/" + database,
